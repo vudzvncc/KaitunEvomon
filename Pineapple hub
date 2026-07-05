@@ -1,0 +1,249 @@
+-- Script Kaitun nhặt rương Evomon - Bản Delta (Toàn bản đồ + Nút GUI)
+-- Tác giả: palofsc
+-- Chức năng: Tìm và di chuyển đến MỌI rương trong Workspace, không giới hạn khoảng cách.
+-- Điều khiển: Nút hình tròn trên màn hình (nhấn để bật/tắt, kéo thả để di chuyển)
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local rootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- CẤU HÌNH (Chỉnh sửa tại đây)
+local CONFIG = {
+    KhoangCachToiThieu = 4,
+    ThoiGianCho = 0.8,
+    TuKhoaRuong = {"Chest", "Rương", "Treasure", "Box", "Crate"},
+    TocDoDiChuyen = 0.06,
+    UuTienXaGan = "gan"
+}
+
+-- BỘ NHỚ ĐỆM
+local daMo = {}
+local dangChay = true
+local busy = false
+local dangDiChuyen = false
+
+-- HÀM TÌM RƯƠNG
+local function TimRuong()
+    local rootPos = rootPart.Position
+    local best = nil
+    local bestDist = (CONFIG.UuTienXaGan == "xa") and -1e9 or 1e9
+
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and not obj:IsA("Terrain") then
+            if daMo[obj] then continue end
+            local ten = obj.Name
+            local ok = false
+            for _, kw in ipairs(CONFIG.TuKhoaRuong) do
+                if string.find(ten, kw, 1, true) then ok = true break end
+            end
+            if not ok then continue end
+            local dist = (obj.Position - rootPos).Magnitude
+            if CONFIG.UuTienXaGan == "xa" then
+                if dist > bestDist then bestDist = dist best = obj end
+            else
+                if dist < bestDist then bestDist = dist best = obj end
+            end
+        end
+    end
+    return best
+end
+
+-- HÀM DI CHUYỂN
+local function DiChuyenDen(targetPos)
+    dangDiChuyen = true
+    local step = 3
+    local maxSteps = 500
+    local count = 0
+    while (rootPart.Position - targetPos).Magnitude > CONFIG.KhoangCachToiThieu do
+        if not dangChay then break end
+        local dir = (targetPos - rootPart.Position).Unit
+        local newPos = rootPart.Position + dir * step
+        rootPart.CFrame = CFrame.new(newPos)
+        task.wait(CONFIG.TocDoDiChuyen)
+        count = count + 1
+        if count > maxSteps then break end
+    end
+    rootPart.CFrame = CFrame.new(targetPos)
+    dangDiChuyen = false
+end
+
+-- HÀM MỞ RƯƠNG
+local function MoRuong(ruong)
+    local click = ruong:FindFirstChild("ClickDetector")
+    if click then
+        local s = pcall(fireclickdetector, click)
+        if s then daMo[ruong] = true return true end
+    end
+    local remote = ruong:FindFirstChild("OpenChest") or ruong:FindFirstChild("RemoteEvent") or ruong.Parent:FindFirstChild("RemoteEvent")
+    if remote and remote:IsA("RemoteEvent") then
+        local s = pcall(remote.FireServer, remote)
+        if s then daMo[ruong] = true return true end
+    end
+    local prompt = ruong:FindFirstChild("ProximityPrompt")
+    if prompt and prompt:IsA("ProximityPrompt") then
+        pcall(function()
+            prompt:InputHoldBegin(nil)
+            task.wait(0.15)
+            prompt:InputHoldEnd(nil)
+        end)
+        daMo[ruong] = true
+        return true
+    end
+    daMo[ruong] = true
+    return false
+end
+
+-- VÒNG LẶP CHÍNH
+local function VongLap()
+    busy = false
+    while dangChay do
+        if not player.Character or not rootPart then
+            task.wait(1)
+            goto next
+        end
+        if not busy and not dangDiChuyen then
+            local ruong = TimRuong()
+            if ruong then
+                busy = true
+                local targetPos = ruong.Position
+                DiChuyenDen(targetPos)
+                task.wait(0.2)
+                local ok = MoRuong(ruong)
+                if ok then
+                    print("[Delta Kaitun] Da mo: ", ruong.Name, " | Vi tri: ", ruong.Position)
+                else
+                    print("[Delta Kaitun] Bo qua (loi): ", ruong.Name)
+                end
+                task.wait(CONFIG.ThoiGianCho)
+                busy = false
+            else
+                if humanoid and dangChay then
+                    humanoid:MoveTo(rootPart.Position + Vector3.new(math.random(-2,2), 0, math.random(-2,2)))
+                end
+                task.wait(0.5)
+            end
+        end
+        ::next::
+        task.wait()
+    end
+end
+
+-- XÓA CACHE
+local function XoaCacheDinhKy()
+    while dangChay do
+        task.wait(8)
+        daMo = {}
+    end
+end
+
+-- ĐIỀU KHIỂN
+local function KhoiDong()
+    dangChay = true
+    task.spawn(VongLap)
+    task.spawn(XoaCacheDinhKy)
+    print("[Delta Kaitun] Da khoi dong.")
+    if nui and nui.BackgroundColor3 then
+        nui.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+        nui.Text = "ON"
+    end
+end
+
+local function Dung()
+    dangChay = false
+    print("[Delta Kaitun] Da dung.")
+    if nui and nui.BackgroundColor3 then
+        nui.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+        nui.Text = "OFF"
+    end
+end
+
+-- === TẠO NÚT HÌNH TRÒN (GUI) - BẢN SỬA LỖI ===
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "KaitunUI_" .. tostring(math.random(1000,9999))
+screenGui.Parent = game:GetService("CoreGui")  -- Gắn vào CoreGui để tránh bị game chặn
+
+local nui = Instance.new("TextButton")
+nui.Size = UDim2.new(0, 60, 0, 60)
+nui.Position = UDim2.new(0.5, -30, 0.8, 0)
+nui.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+nui.BackgroundTransparency = 0.2
+nui.BorderSizePixel = 2
+nui.BorderColor3 = Color3.fromRGB(255, 255, 255)
+nui.Text = "ON"
+nui.TextColor3 = Color3.fromRGB(255, 255, 255)
+nui.TextScaled = true
+nui.Font = Enum.Font.GothamBold
+nui.ZIndex = 10
+nui.Parent = screenGui
+
+-- Làm tròn nút
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(1, 0)
+corner.Parent = nui
+
+-- HÀM BẬT/TẮT KHI NHẤP NÚT
+nui.MouseButton1Click:Connect(function()
+    if dangChay then
+        Dung()
+    else
+        KhoiDong()
+    end
+end)
+
+-- === CHỨC NĂNG KÉO THẢ ĐỂ ĐIỀU CHỈNH VỊ TRÍ ===
+local dragging = false
+local dragInput = nil
+local dragStartPos = nil
+local startPos = nil
+
+nui.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStartPos = input.Position
+        startPos = nui.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+nui.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStartPos
+        local newX = startPos.X.Scale + (delta.X / game:GetService("GuiService").ScreenSize.X)
+        local newY = startPos.Y.Scale + (delta.Y / game:GetService("GuiService").ScreenSize.Y)
+        nui.Position = UDim2.new(newX, 0, newY, 0)
+    end
+end)
+
+-- === GIỮ PHÍM TẮT F4 (VẪN HOẠT ĐỘNG) ===
+game:GetService("UserInputService").InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.F4 then
+        if dangChay then
+            Dung()
+        else
+            KhoiDong()
+        end
+    end
+end)
+
+-- RESPAWN
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    rootPart = character:WaitForChild("HumanoidRootPart")
+    humanoid = character:WaitForChild("Humanoid")
+end)
+
+-- TỰ CHẠY
+KhoiDong()
